@@ -13,11 +13,20 @@ import android.os.Vibrator;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import io.agora.media.RtcTokenBuilder2;
 import io.agora.rtc2.Constants;
@@ -32,7 +41,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final String AGORA_APP_ID = "585ceb26ea044e649a7a39304d323dc7";
     private static final String CHANNEL_NAME = "HoneyFamily";
     private static final int LOCAL_UID = 1001;
-    private static final String SERVER_URL = "http://of1wd11788567.vicp.fun/heima/token/getToken";
 
     // 权限请求码
     private static final int PERMISSION_REQUEST_CODE = 101;
@@ -41,21 +49,32 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             Manifest.permission.CAMERA,
             Manifest.permission.VIBRATE,
             Manifest.permission.FOREGROUND_SERVICE,
-            Manifest.permission.INTERNET
+            Manifest.permission.INTERNET,
+            Manifest.permission.DISABLE_KEYGUARD // 新增锁屏权限
     };
 
     private String currentToken = ""; // 保存当前有效Token
 
+    // UI组件
     private Vibrator vibrator;
     private RtcEngine mRtcEngine;
     private SurfaceView svLocal, svRemote;
-    private Button btnAnswer, btnReject, btnHangup; // 新增接听、拒绝按钮
+    private Button btnAnswer, btnReject, btnHangup, btnCallSelected;
+    private ListView lvUserList;
+    private LinearLayout llUserList;
+    private ArrayAdapter<String> userListAdapter;
+    private Set<Integer> channelUserUids = new HashSet<>(); // 频道内用户UID集合
+    private int selectedCallUid = -1; // 选中要呼叫的用户UID
+
+    // 状态标记
     private int mRemoteUid = -1;
     private PowerManager.WakeLock wakeLock;
+    private PowerManager.WakeLock screenWakeLock; // 新增屏幕唤醒锁
     private Intent foregroundServiceIntent;
     private boolean isLocalPreviewStarted = false;
-    private boolean isInCall = false; // 标记：是否已建立通话
-    private boolean isRinging = false; // 标记：是否正在振铃
+    private boolean isInCall = false; // 是否已建立通话
+    private boolean isRinging = false; // 是否正在振铃
+    private boolean isInitiativeCall = false; // 是否是主动呼叫
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,11 +90,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         // 2. 初始化震动器
         vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
 
-        // 3. 初始化唤醒锁
+        // 3. 初始化唤醒锁（修复锁屏振动）
         PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        // 部分唤醒锁：保持CPU运行
         wakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
                 "CallDemo::VibrateWakeLock"
+        );
+        // 屏幕唤醒锁：点亮屏幕
+        screenWakeLock = powerManager.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE,
+                "CallDemo::ScreenWakeLock"
         );
 
         // 4. 启动前台服务
@@ -91,13 +116,31 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             initAgoraEngine();
             setupVideoConfig();
             svLocal.getHolder().addCallback(this);
-            // 先获取Token，再加入频道（仅监听，不初始化音视频）
-            getTokenFromServer(() -> joinChannelForListening());
+            // 初始化用户列表适配器
+            initUserListAdapter();
+            // 先获取Token，再加入频道（仅监听）
+            getTokenFromServer(this::joinChannelForListening);
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "初始化失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
             finish();
         }
+    }
+
+    // 初始化用户列表适配器
+    private void initUserListAdapter() {
+        List<String> userList = new ArrayList<>();
+        userListAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_single_choice, userList);
+        lvUserList.setAdapter(userListAdapter);
+        lvUserList.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
+        // 选中用户监听
+        lvUserList.setOnItemClickListener((parent, view, position, id) -> {
+            String selectedItem = (String) parent.getItemAtPosition(position);
+            if (selectedItem != null && selectedItem.contains("UID:")) {
+                selectedCallUid = Integer.parseInt(selectedItem.split(":")[1].trim());
+                btnCallSelected.setVisibility(View.VISIBLE);
+            }
+        });
     }
 
     // 检查权限是否全部授予
@@ -134,31 +177,45 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private void initView() {
         svLocal = findViewById(R.id.sv_local);
         svRemote = findViewById(R.id.sv_remote);
-        btnAnswer = findViewById(R.id.btn_answer); // 新增接听按钮
-        btnReject = findViewById(R.id.btn_reject); // 新增拒绝按钮
+        btnAnswer = findViewById(R.id.btn_answer);
+        btnReject = findViewById(R.id.btn_reject);
         btnHangup = findViewById(R.id.btn_hangup);
+        btnCallSelected = findViewById(R.id.btn_call_selected);
+        lvUserList = findViewById(R.id.lv_user_list);
+        llUserList = findViewById(R.id.ll_user_list);
 
-        // 初始化按钮点击事件
+        // 按钮点击事件
         btnAnswer.setOnClickListener(this);
         btnReject.setOnClickListener(this);
         btnHangup.setOnClickListener(this);
+        btnCallSelected.setOnClickListener(this);
 
-        // 初始状态：只显示接听/拒绝按钮，隐藏挂断按钮，隐藏视频画面
-        btnAnswer.setVisibility(View.VISIBLE);
-        btnReject.setVisibility(View.VISIBLE);
-        btnHangup.setVisibility(View.GONE);
-        svLocal.setVisibility(View.GONE);
-        svRemote.setVisibility(View.GONE);
+        // 初始状态
+        resetUIState();
 
         svLocal.setZOrderOnTop(true);
     }
 
+    // 重置UI状态为初始值
+    private void resetUIState() {
+        btnAnswer.setVisibility(View.VISIBLE);
+        btnReject.setVisibility(View.VISIBLE);
+        btnHangup.setVisibility(View.GONE);
+        btnCallSelected.setVisibility(View.GONE);
+        svLocal.setVisibility(View.GONE);
+        svRemote.setVisibility(View.GONE);
+        llUserList.setVisibility(View.VISIBLE); // 始终显示用户列表
+        selectedCallUid = -1;
+    }
+
     private void initAgoraEngine() throws Exception {
-        mRtcEngine = RtcEngine.create(getApplicationContext(), AGORA_APP_ID, mRtcEventHandler);
-        // 初始化时先关闭音视频（接听后再开启）
-        mRtcEngine.disableVideo();
-        mRtcEngine.disableAudio();
-        mRtcEngine.setChannelProfile(Constants.CHANNEL_PROFILE_COMMUNICATION);
+        if (mRtcEngine == null) {
+            mRtcEngine = RtcEngine.create(getApplicationContext(), AGORA_APP_ID, mRtcEventHandler);
+            // 初始化时先关闭音视频
+            mRtcEngine.disableVideo();
+            mRtcEngine.disableAudio();
+            mRtcEngine.setChannelProfile(Constants.CHANNEL_PROFILE_COMMUNICATION);
+        }
     }
 
     // 优化视频编码配置
@@ -175,17 +232,63 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     // 加入频道仅用于监听来电（不开启音视频）
     private void joinChannelForListening() {
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            if (currentToken.isEmpty()) {
-                Toast.makeText(this, "Token为空，无法加入频道", Toast.LENGTH_SHORT).show();
+            if (currentToken.isEmpty() || mRtcEngine == null) {
+                Toast.makeText(this, "Token为空或引擎未初始化，无法加入频道", Toast.LENGTH_SHORT).show();
                 return;
             }
             // 加入频道，但不开启音视频
             mRtcEngine.joinChannel(currentToken, CHANNEL_NAME, null, LOCAL_UID);
-            Toast.makeText(this, "已进入通话频道，等待来电...", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "已进入通话频道，等待来电/可主动呼叫...", Toast.LENGTH_SHORT).show();
         }, 1000);
     }
 
-    // 接听通话：开启音视频、初始化预览、绑定远程视频
+    // 主动呼叫指定用户
+    private void callSelectedUser() {
+        if (selectedCallUid == -1 || selectedCallUid == LOCAL_UID) {
+            Toast.makeText(this, "请选择有效的用户进行呼叫", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (isInCall) {
+            Toast.makeText(this, "当前已有通话，请先挂断", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        isInitiativeCall = true;
+        mRemoteUid = selectedCallUid;
+        // 主动呼叫时直接开启音视频
+        try {
+            mRtcEngine.enableVideo();
+            mRtcEngine.enableAudio();
+            mRtcEngine.setEnableSpeakerphone(true);
+            mRtcEngine.muteLocalVideoStream(false);
+
+            // 显示视频画面，切换按钮状态
+            svLocal.setVisibility(View.VISIBLE);
+            svRemote.setVisibility(View.VISIBLE);
+            btnAnswer.setVisibility(View.GONE);
+            btnReject.setVisibility(View.GONE);
+            btnHangup.setVisibility(View.VISIBLE);
+            btnCallSelected.setVisibility(View.GONE);
+
+            // 初始化本地预览
+            if (svLocal.getHolder().getSurface().isValid()) {
+                setupLocalVideo();
+            }
+
+            // 绑定远程视频
+            setupRemoteVideo(mRemoteUid);
+
+            // 标记通话已建立
+            isInCall = true;
+            Toast.makeText(this, "已呼叫用户 UID：" + mRemoteUid, Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(this, "呼叫失败：" + e.getMessage(), Toast.LENGTH_SHORT).show();
+            isInitiativeCall = false;
+        }
+    }
+
+    // 接听通话
     private void answerCall() {
         if (isInCall || mRemoteUid == -1) {
             return;
@@ -207,8 +310,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             btnAnswer.setVisibility(View.GONE);
             btnReject.setVisibility(View.GONE);
             btnHangup.setVisibility(View.VISIBLE);
+            btnCallSelected.setVisibility(View.GONE);
 
-            // 4. 初始化本地预览（如果Surface已创建）
+            // 4. 初始化本地预览
             if (svLocal.getHolder().getSurface().isValid()) {
                 setupLocalVideo();
             }
@@ -218,40 +322,42 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
             // 6. 标记通话已建立
             isInCall = true;
-            Toast.makeText(this, "已接听通话", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "已接听通话（UID：" + mRemoteUid + "）", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "接听失败：" + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 
-    // 拒绝通话：挂断并清理资源
+    // 拒绝通话
     private void rejectCall() {
         stopRinging();
-        hangupCall();
+        mRemoteUid = -1;
         Toast.makeText(this, "已拒绝通话", Toast.LENGTH_SHORT).show();
     }
 
-    // 启动振铃
+    // 启动振铃（修复锁屏振动）
     private void startRinging() {
         if (isRinging) {
             return;
         }
         isRinging = true;
 
-        // 唤醒屏幕
+        // 1. 唤醒屏幕（修复锁屏不振动核心）
+        if (screenWakeLock != null && !screenWakeLock.isHeld()) {
+            screenWakeLock.acquire(30*1000); // 持锁30秒
+        }
         if (wakeLock != null && !wakeLock.isHeld()) {
-            wakeLock.acquire(10*1000); // 持锁10秒
+            wakeLock.acquire(30*1000);
         }
 
-        // 循环振铃（3秒一次，直到接听/拒绝）
+        // 2. 循环振铃
         if (vibrator != null && vibrator.hasVibrator()) {
             try {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    // 循环振铃：振动1秒，间隔2秒，重复无限次
                     VibrationEffect effect = VibrationEffect.createWaveform(
                             new long[]{0, 1000, 2000},
-                            0 // 循环索引，0表示无限循环
+                            0 // 无限循环
                     );
                     vibrator.vibrate(effect);
                 } else {
@@ -259,6 +365,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 }
             } catch (Exception e) {
                 e.printStackTrace();
+                Toast.makeText(this, "振动失败：" + e.getMessage(), Toast.LENGTH_SHORT).show();
             }
         }
 
@@ -278,9 +385,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }
+        if (screenWakeLock != null && screenWakeLock.isHeld()) {
+            screenWakeLock.release();
+        }
     }
 
-    // 从服务端获取Token（本地生成方式）
+    // 从服务端获取Token
     private void getTokenFromServer(Runnable onSuccess) {
         new Thread(() -> {
             try {
@@ -340,9 +450,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mRemoteUid = uid;
     }
 
-    // 挂断逻辑
+    // 挂断逻辑（核心：重置状态，支持重新接听）
     private void hangupCall() {
         isInCall = false;
+        isInitiativeCall = false;
         stopRinging();
 
         if (mRtcEngine != null) {
@@ -356,54 +467,94 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             mRtcEngine.disableVideo();
             mRtcEngine.disableAudio();
             mRtcEngine.leaveChannel();
+
+            // 重置状态
             mRemoteUid = -1;
             isLocalPreviewStarted = false;
         }
 
         // 恢复初始UI状态
-        runOnUiThread(() -> {
-            svLocal.setVisibility(View.GONE);
-            svRemote.setVisibility(View.GONE);
-            btnAnswer.setVisibility(View.VISIBLE);
-            btnReject.setVisibility(View.VISIBLE);
-            btnHangup.setVisibility(View.GONE);
-        });
+        runOnUiThread(this::resetUIState);
 
-        if (foregroundServiceIntent != null) {
-            stopService(foregroundServiceIntent);
+        // 核心修复：重新初始化，支持再次接听/呼叫
+        try {
+            // 重新初始化引擎（如果已销毁）
+            if (mRtcEngine == null) {
+                initAgoraEngine();
+                setupVideoConfig();
+            }
+            // 重新获取Token并加入频道
+            getTokenFromServer(this::joinChannelForListening);
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(this, "重置失败：" + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
+
+        Toast.makeText(this, "已挂断通话，可重新接听/呼叫", Toast.LENGTH_SHORT).show();
+    }
+
+    // 更新频道用户列表
+    private void updateChannelUserList() {
+        runOnUiThread(() -> {
+            List<String> userList = new ArrayList<>();
+            for (int uid : channelUserUids) {
+                if (uid != LOCAL_UID) { // 排除自己
+                    userList.add("用户 UID: " + uid);
+                }
+            }
+            userListAdapter.clear();
+            userListAdapter.addAll(userList);
+            userListAdapter.notifyDataSetChanged();
+        });
     }
 
     // 声网回调
     private final IRtcEngineEventHandler mRtcEventHandler = new IRtcEngineEventHandler() {
         @Override
         public void onJoinChannelSuccess(String channel, int uid, int elapsed) {
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "已加入频道，等待来电", Toast.LENGTH_SHORT).show());
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, "已加入频道", Toast.LENGTH_SHORT).show());
+            // 加入频道后添加自己到用户列表
+            channelUserUids.add(LOCAL_UID);
+            updateChannelUserList();
         }
 
         @Override
         public void onUserJoined(int uid, int elapsed) {
-            // 收到来电，记录对方UID并启动振铃
-            mRemoteUid = uid;
-            runOnUiThread(() -> startRinging());
+            // 新增用户到列表
+            channelUserUids.add(uid);
+            updateChannelUserList();
+
+            // 被动来电：非主动呼叫且未在通话中时启动振铃
+            if (!isInitiativeCall && !isInCall) {
+                mRemoteUid = uid;
+                runOnUiThread(() -> startRinging());
+            }
         }
 
         @Override
         public void onUserOffline(int uid, int reason) {
+            // 移除离线用户
+            channelUserUids.remove(uid);
+            updateChannelUserList();
+
             runOnUiThread(() -> {
                 stopRinging();
                 String tip = reason == Constants.USER_OFFLINE_QUIT ? "对方已挂断" : "对方网络断开";
                 Toast.makeText(MainActivity.this, tip, Toast.LENGTH_SHORT).show();
-                mRemoteUid = -1;
-                if (isInCall) {
+
+                // 如果是当前通话对象离线，挂断并重置
+                if (uid == mRemoteUid && isInCall) {
                     hangupCall();
                 }
+                mRemoteUid = -1;
             });
         }
 
         @Override
         public void onLeaveChannel(RtcStats stats) {
             runOnUiThread(() -> Toast.makeText(MainActivity.this, "已离开频道", Toast.LENGTH_SHORT).show());
+            channelUserUids.clear();
+            updateChannelUserList();
         }
 
         // Token即将过期续期
@@ -435,13 +586,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             rejectCall(); // 拒绝通话
         } else if (id == R.id.btn_hangup) {
             hangupCall(); // 挂断通话
+        } else if (id == R.id.btn_call_selected) {
+            callSelectedUser(); // 主动呼叫选中用户
         }
     }
 
     // SurfaceHolder回调
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
-        // 仅在已接听通话时初始化本地预览
         if (isInCall) {
             setupLocalVideo();
         }
@@ -461,23 +613,31 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     protected void onDestroy() {
         stopRinging();
+        // 释放唤醒锁
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }
+        if (screenWakeLock != null && screenWakeLock.isHeld()) {
+            screenWakeLock.release();
+        }
+        // 释放振动器
         if (vibrator != null) {
             vibrator.cancel();
         }
+        // 停止前台服务
         if (foregroundServiceIntent != null) {
             stopService(foregroundServiceIntent);
         }
+        // 移除Surface回调
         if (svLocal != null) {
             svLocal.getHolder().removeCallback(this);
         }
-        super.onDestroy();
+        // 销毁引擎
         if (mRtcEngine != null) {
             mRtcEngine.leaveChannel();
             RtcEngine.destroy();
             mRtcEngine = null;
         }
+        super.onDestroy();
     }
 }

@@ -21,6 +21,43 @@
         android:layout_height="match_parent"
         android:visibility="gone"/>
 
+    <!-- 频道用户列表 -->
+    <LinearLayout
+        android:id="@+id/ll_user_list"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_marginTop="10dp"
+        android:orientation="vertical"
+        android:padding="10dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="频道内用户列表："
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"/>
+
+        <ListView
+            android:id="@+id/lv_user_list"
+            android:layout_width="match_parent"
+            android:layout_height="150dp"
+            android:layout_marginTop="5dp"
+            android:background="#33FFFFFF"/>
+    </LinearLayout>
+
+    <!-- 主动呼叫按钮 -->
+    <Button
+        android:id="@+id/btn_call_selected"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/ll_user_list"
+        android:layout_centerHorizontal="true"
+        android:text="呼叫选中用户"
+        android:textColor="#FFFFFF"
+        android:backgroundTint="#2196F3"
+        android:visibility="gone"/>
+
     <!-- 接听按钮 -->
     <Button
         android:id="@+id/btn_answer"
