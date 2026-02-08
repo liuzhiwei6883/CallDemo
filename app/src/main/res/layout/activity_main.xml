@@ -1,33 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="#000">
 
-    <!-- 远端视频：全屏 -->
+    <!-- 本地视频画面 -->
+    <SurfaceView
+        android:id="@+id/sv_local"
+        android:layout_width="120dp"
+        android:layout_height="160dp"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentRight="true"
+        android:layout_margin="10dp"
+        android:visibility="gone"/>
+
+    <!-- 远程视频画面 -->
     <SurfaceView
         android:id="@+id/sv_remote"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"/>
+        android:layout_height="match_parent"
+        android:visibility="gone"/>
 
-    <!-- 本地视频：固定大小、右上角、必见 -->
-    <SurfaceView
-        android:id="@+id/sv_local"
-        android:layout_width="150dp"
-        android:layout_height="200dp"
-        android:layout_alignParentRight="true"
-        android:layout_alignParentTop="true"
-        android:layout_margin="10dp"
-        android:visibility="visible"/>
+    <!-- 接听按钮 -->
+    <Button
+        android:id="@+id/btn_answer"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:layout_centerHorizontal="true"
+        android:layout_centerVertical="true"
+        android:layout_marginEnd="20dp"
+        android:backgroundTint="#00C853"
+        android:text="接听"
+        android:textColor="#FFFFFF"
+        android:textSize="20sp"/>
 
+    <!-- 拒绝按钮 -->
+    <Button
+        android:id="@+id/btn_reject"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:layout_centerVertical="true"
+        android:layout_toLeftOf="@id/btn_answer"
+        android:backgroundTint="#FF5252"
+        android:text="拒绝"
+        android:textColor="#FFFFFF"
+        android:textSize="20sp"/>
+
+    <!-- 挂断按钮（初始隐藏） -->
     <Button
         android:id="@+id/btn_hangup"
         android:layout_width="80dp"
         android:layout_height="80dp"
         android:layout_alignParentBottom="true"
         android:layout_centerHorizontal="true"
-        android:layout_marginBottom="20dp"
-        android:background="#F44336"
+        android:layout_marginBottom="30dp"
+        android:backgroundTint="#FF5252"
         android:text="挂断"
-        android:textColor="@color/white"/>
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:visibility="gone"/>
 
 </RelativeLayout>
