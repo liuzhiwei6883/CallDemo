@@ -1,0 +1,13 @@
+# Android Studio文件
+.idea/
+*.iml
+.gradle/
+build/
+app/build/
+# 本地配置文件
+local.properties
+# 日志/缓存
+*.log
+.DS_Store
+# 第三方依赖（如有）
+node_modules/

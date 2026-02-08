@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 允许指定域名的明文HTTP请求 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">of1wd11788567.vicp.fun</domain>
+        <!-- 可选：添加你的测试服务器IP，如192.168.1.100 -->
+        <!-- <domain includeSubdomains="true">192.168.1.100</domain> -->
+    </domain-config>
+    <!-- 保持其他域名的安全策略（默认禁止明文） -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
