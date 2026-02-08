@@ -1,28 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 网络权限：跨互联网通信核心 -->
+    <!-- 原有权限 -->
     <uses-permission android:name="android.permission.INTERNET" />
-
     <uses-permission android:name="android.permission.VIBRATE" />
-
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- 音视频采集权限 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- 音频控制权限：播放远端声音、切换扬声器 -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <!-- 硬件特性要求：强制真机（排除模拟器） -->
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
-    <!-- 前台服务权限（Android 13+ 必需） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- Android 14+ 需指定前台服务类型 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
-    <!-- 声网App ID配置（可选，也可在代码中设置） -->
+
+    <!-- 新增锁屏唤醒权限（修复锁屏振动关键） -->
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -34,11 +30,9 @@
         <meta-data
             android:name="agora.sdk.appid"
             android:value="你的32位声网App ID" />
-        <!-- 注册前台服务 -->
         <service
             android:name=".CallForegroundService"
-            android:foregroundServiceType="microphone|camera" /> <!-- 适配Android 14+ -->
-
+            android:foregroundServiceType="microphone|camera" />
         <activity
             android:name=".MainActivity"
             android:exported="true">
